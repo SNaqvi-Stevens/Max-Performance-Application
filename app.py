@@ -42,9 +42,9 @@ from visualizer import (
     plot_bmi_by_experience,
     plot_hr_zone_distribution,
     plot_calories_vs_duration,
-    plot_bmi_by_experience,
 )
 from data_loader import load_and_clean, build_member_from_row
+from recommender import recommend
 
 # -------------------------------------------------------------------
 # Styling constants — keeping it clean and readable
@@ -182,12 +182,14 @@ class MaxPerformanceApp(tk.Tk):
         self.tab_perf     = PerformanceTab(self.nb, self)
         self.tab_profile  = ProfilingTab(self.nb, self)
         self.tab_charts   = ChartsTab(self.nb, self)
+        self.tab_rec      = RecommendationTab(self.nb, self)
         self.tab_tests    = TestsTab(self.nb, self)
 
         self.nb.add(self.tab_setup,   text="  Member Setup  ")
         self.nb.add(self.tab_perf,    text="  Performance   ")
         self.nb.add(self.tab_profile, text="  Profiling     ")
         self.nb.add(self.tab_charts,  text="  Charts        ")
+        self.nb.add(self.tab_rec,     text=" ⚡ Workout Plan ")
         self.nb.add(self.tab_tests,   text="  Run Tests     ")
 
         # status bar
@@ -289,6 +291,13 @@ class SetupTab(ttk.Frame):
         make_label(left, "Member Profile", font=FONT_H).grid(
             row=5, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
+        # unit toggle — metric (kg/m) vs imperial (lbs/ft+in)
+        self._use_metric = True
+        unit_row = tk.Frame(left, bg=PANEL)
+        unit_row.grid(row=5, column=1, sticky="e", pady=(0, 6))
+        self._unit_btn = make_button(unit_row, "Switch to lbs/ft", self._toggle_units)
+        self._unit_btn.pack()
+
         # input fields
         fields = [
             ("Member ID (int):",     "member_id",  "1"),
@@ -302,15 +311,23 @@ class SetupTab(ttk.Frame):
             ("Resting HR (bpm):",    "resting",     "62.0"),
         ]
         self._vars = {}
+        self._field_labels = {}
         for i, (label, key, default) in enumerate(fields):
-            make_label(left, label).grid(row=6 + i, column=0, sticky="w", pady=2)
+            lbl = make_label(left, label)
+            lbl.grid(row=6 + i, column=0, sticky="w", pady=2)
+            self._field_labels[key] = lbl
             var = tk.StringVar(value=default)
             self._vars[key] = var
             make_entry(left, textvariable=var, width=14).grid(
                 row=6 + i, column=1, sticky="w", padx=(6, 0), pady=2)
 
+        # extra field for feet+inches when imperial
+        self._ht_in_label = make_label(left, "Height (in):")
+        self._ht_in_var = tk.StringVar(value="2")
+        self._ht_in_entry = make_entry(left, textvariable=self._ht_in_var, width=14)
+
         btn_row2 = tk.Frame(left, bg=PANEL)
-        btn_row2.grid(row=6 + len(fields), column=0, columnspan=2, sticky="w", pady=10)
+        btn_row2.grid(row=6 + len(fields) + 1, column=0, columnspan=2, sticky="w", pady=10)
         make_button(btn_row2, "Create Member", self._create_member, color=ACCENT).pack(side="left", padx=(0,6))
         make_button(btn_row2, "From Row 0", self._load_from_row, color=WARNING).pack(side="left")
 
@@ -333,6 +350,56 @@ class SetupTab(ttk.Frame):
             "Tip: 'From Row 0' auto-fills the form\n"
             "from the first row of the dataset."
         )
+
+    def _toggle_units(self):
+        """Switch between metric (kg/m) and imperial (lbs/ft+in)."""
+        # read current values before switching
+        try:
+            cur_wt = float(self._vars["weight_kg"].get())
+            cur_ht = float(self._vars["height_m"].get())
+        except ValueError:
+            cur_wt = 65.0
+            cur_ht = 1.68
+
+        if self._use_metric:
+            # switching TO imperial
+            self._use_metric = False
+            self._unit_btn.config(text="Switch to kg/m")
+            self._field_labels["weight_kg"].config(text="Weight (lbs):")
+            self._field_labels["height_m"].config(text="Height (ft):")
+            # convert kg -> lbs
+            lbs = round(cur_wt * 2.20462, 1)
+            self._vars["weight_kg"].set(str(lbs))
+            # convert m -> ft and inches
+            total_in = cur_ht * 39.3701
+            ft = int(total_in // 12)
+            inches = round(total_in % 12, 1)
+            self._vars["height_m"].set(str(ft))
+            self._ht_in_var.set(str(inches))
+            # show the inches entry
+            self._ht_in_label.grid(row=10, column=0, sticky="w", pady=2)
+            self._ht_in_entry.grid(row=10, column=1, sticky="w", padx=(6, 0), pady=2)
+        else:
+            # switching TO metric
+            self._use_metric = True
+            self._unit_btn.config(text="Switch to lbs/ft")
+            self._field_labels["weight_kg"].config(text="Weight (kg):")
+            self._field_labels["height_m"].config(text="Height (m):")
+            # convert lbs -> kg
+            kg = round(cur_wt / 2.20462, 1)
+            self._vars["weight_kg"].set(str(kg))
+            # convert ft+in -> m
+            try:
+                ft = float(self._vars["height_m"].get())
+                inches = float(self._ht_in_var.get())
+            except ValueError:
+                ft, inches = 5.0, 6.0
+            total_in = ft * 12 + inches
+            m = round(total_in * 0.0254, 2)
+            self._vars["height_m"].set(str(m))
+            # hide inches entry
+            self._ht_in_label.grid_remove()
+            self._ht_in_entry.grid_remove()
 
     def _browse(self):
         """Open a file dialog to pick the CSV file."""
@@ -363,11 +430,22 @@ class SetupTab(ttk.Frame):
         row = self.app.df.iloc[0]
         self._vars["age"].set(str(round(float(row["Age"]), 1)))
         self._vars["gender"].set(str(row["Gender"]))
-        self._vars["weight_kg"].set(str(round(float(row["weight_kg"]), 1)))
-        self._vars["height_m"].set(str(round(float(row["height_m"]), 2)))
+        wt_kg = round(float(row["weight_kg"]), 1)
+        ht_m = round(float(row["height_m"]), 2)
+        if self._use_metric:
+            self._vars["weight_kg"].set(str(wt_kg))
+            self._vars["height_m"].set(str(ht_m))
+        else:
+            # convert to imperial for display
+            self._vars["weight_kg"].set(str(round(wt_kg * 2.20462, 1)))
+            total_in = ht_m * 39.3701
+            ft = int(total_in // 12)
+            inches = round(total_in % 12, 1)
+            self._vars["height_m"].set(str(ft))
+            self._ht_in_var.set(str(inches))
         self._vars["bmi"].set(str(round(float(row["BMI"]), 2)))
-        self._vars["exp_level"].set(str(int(row["experience_level"])))
-        self._vars["freq"].set(str(round(float(row["workout_frequency"]), 1)))
+        self._vars["exp_level"].set(str(int(row["exp_level"])))
+        self._vars["freq"].set(str(round(float(row["wk_freq"]), 1)))
         resting = row.get("resting_bpm", 65.0)
         self._vars["resting"].set(str(round(float(resting) if str(resting) != "nan" else 65.0, 1)))
         append_output(self.output, "\nForm filled from dataset row 0.")
@@ -375,15 +453,27 @@ class SetupTab(ttk.Frame):
     def _create_member(self):
         """Read the form fields and create a GymMember object."""
         try:
+            # get weight and height, convert from imperial if needed
+            if self._use_metric:
+                weight_kg = float(self._vars["weight_kg"].get())
+                height_m = float(self._vars["height_m"].get())
+            else:
+                # lbs -> kg
+                weight_kg = round(float(self._vars["weight_kg"].get()) / 2.20462, 2)
+                # ft + in -> m
+                ft = float(self._vars["height_m"].get())
+                inches = float(self._ht_in_var.get())
+                height_m = round((ft * 12 + inches) * 0.0254, 3)
+
             member = GymMember(
                 member_id=int(self._vars["member_id"].get()),
                 age=float(self._vars["age"].get()),
                 gender=self._vars["gender"].get(),
-                weight_kg=float(self._vars["weight_kg"].get()),
-                height_m=float(self._vars["height_m"].get()),
+                weight_kg=weight_kg,
+                height_m=height_m,
                 bmi=float(self._vars["bmi"].get()),
-                experience_level=int(self._vars["exp_level"].get()),
-                workout_frequency=float(self._vars["freq"].get()),
+                exp_level=int(self._vars["exp_level"].get()),
+                wk_freq=float(self._vars["freq"].get()),
                 resting_bpm=float(self._vars["resting"].get()),
             )
         except (ValueError, TypeError) as e:
@@ -484,7 +574,7 @@ class PerformanceTab(ttk.Frame):
 
         # use describe_series for each metric
         for col, label in [
-            ("calories_burned", "Calories Burned"),
+            ("cal_burned", "Calories Burned"),
             ("duration_min",    "Session Duration (min)"),
             ("avg_heart_rate",  "Avg Heart Rate (bpm)"),
         ]:
@@ -492,7 +582,7 @@ class PerformanceTab(ttk.Frame):
             lines.append("")
 
         # water intake summary
-        lines.append(f"Avg Water Intake : {tracker.df['water_intake_liters'].mean():.2f} liters/session")
+        lines.append(f"Avg Water Intake : {tracker.df['water_liters'].mean():.2f} liters/session")
 
         # high-calorie sessions via generator
         high_cal = list(yield_high_calorie_sessions(tracker.df, threshold=1000.0))
@@ -510,7 +600,7 @@ class PerformanceTab(ttk.Frame):
         dist = tracker.workout_type_distribution()
 
         # total calories using aggregate_calories (reduce-based)
-        total_cal = aggregate_calories(list(tracker.df["calories_burned"].dropna()))
+        total_cal = aggregate_calories(list(tracker.df["cal_burned"].dropna()))
 
         # exercise distribution proportions
         exercises = list(tracker.df["exercise_type"].dropna())
@@ -526,7 +616,7 @@ class PerformanceTab(ttk.Frame):
         for _, row in cal_by_type.iterrows():
             lines.append(
                 "  " + str(row["exercise_type"]).ljust(20) +
-                str(round(row["avg_calories"])).rjust(7) + " kcal avg   (" +
+                str(round(row["avg_cal"])).rjust(7) + " kcal avg   (" +
                 str(int(row["sessions"])) + " sessions)"
             )
 
@@ -544,7 +634,7 @@ class PerformanceTab(ttk.Frame):
         if not self._check_ready(): return
         tracker = self.app.tracker
 
-        top = tracker.top_n_sessions(n=10, by="calories_burned")
+        top = tracker.top_n_sessions(n=10, by="cal_burned")
 
         lines = ["Top 10 Sessions by Calories Burned", "=" * 42, ""]
         lines.append(f"  {'#':<4} {'Type':<22} {'Dur (min)':<12} {'Calories':<12} {'Avg HR':<10} {'Intensity'}")
@@ -554,7 +644,7 @@ class PerformanceTab(ttk.Frame):
             lines.append(
                 f"  {i+1:<4} {str(row['exercise_type']):<22} "
                 f"{row['duration_min']:<12.1f} "
-                f"{row['calories_burned']:<12.0f} "
+                f"{row['cal_burned']:<12.0f} "
                 f"{row['avg_heart_rate']:<10.0f} "
                 f"{str(row['intensity_level'])}"
             )
@@ -569,7 +659,7 @@ class PerformanceTab(ttk.Frame):
         lines = ["Trend Analysis", "=" * 42, ""]
 
         for col, label in [
-            ("calories_burned", "Calories Burned"),
+            ("cal_burned", "Calories Burned"),
             ("duration_min",    "Session Duration"),
             ("avg_heart_rate",  "Avg Heart Rate"),
             ("BMI",             "BMI"),
@@ -896,7 +986,188 @@ class ChartsTab(ttk.Frame):
 
 
 # -------------------------------------------------------------------
-# Tab 5: Run Tests
+# -------------------------------------------------------------------
+# Tab 5: Workout Recommendations
+# -------------------------------------------------------------------
+
+class RecommendationTab(ttk.Frame):
+    """
+    Generates a personalised weekly workout plan and health advice
+    based on the member's BMI, experience level, and HR metrics.
+    """
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.configure(style="TFrame")
+        self._build()
+
+    def _build(self):
+        top = tk.Frame(self, bg=PANEL, padx=12, pady=10)
+        top.pack(fill="x")
+
+        make_label(top, "⚡ Personalised Workout Plan", font=FONT_H).pack(side="left")
+
+        btn_frame = tk.Frame(top, bg=PANEL)
+        btn_frame.pack(side="right")
+        make_button(btn_frame, "Generate Plan", self._generate, color=ACCENT).pack(side="left", padx=3)
+        make_button(btn_frame, "Weekly Schedule", self._show_week, color=SUCCESS).pack(side="left", padx=3)
+        make_button(btn_frame, "Health Advice", self._show_advice, color=WARNING).pack(side="left", padx=3)
+        make_button(btn_frame, "HR Targets", self._show_hr).pack(side="left", padx=3)
+
+        self.output = make_output(self, height=32, width=90)
+        self.output.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        write_output(self.output,
+            "Create a member profile in the Setup tab first.\n\n"
+            "Then click 'Generate Plan' to get a personalised\n"
+            "weekly workout schedule and health advice based\n"
+            "on your BMI, experience level, and heart rate metrics."
+        )
+        self._rec = None
+
+    def _check_ready(self):
+        if self.app.member is None:
+            messagebox.showwarning("Not Ready", "Set up a member in the Setup tab first.")
+            return False
+        return True
+
+    def _generate(self):
+        if not self._check_ready(): return
+        self._rec = recommend(self.app.member)
+        m = self.app.member
+        r = self._rec
+
+        DAY_ICONS = {"Strength": "🏋", "Cardio": "🏃", "HIIT": "⚡", "Yoga": "🧘", "Rest": "💤"}
+
+        lines = [
+            "PERSONALISED WORKOUT PLAN",
+            "=" * 55,
+            f"  Member        : #{m.member_id} · {m.gender} · Age {int(m.age)}",
+            f"  BMI           : {m.bmi} ({r['bmi_cat']})",
+            f"  Experience    : {m.experience_label}",
+            f"  Goal          : {r['goal_label']}",
+            "",
+            "WEEKLY PLAN SUMMARY",
+            "-" * 55,
+        ]
+
+        for day, info in r["week"].items():
+            icon = DAY_ICONS.get(info["type"], "·")
+            if info["type"] == "Rest":
+                lines.append(f"  {day:<10} {icon}  Rest day — active recovery recommended")
+            else:
+                lines.append(f"  {day:<10} {icon}  {info['type']:<12} {info['duration']} min  ({info.get('intensity','').title()})")
+
+        lines += [
+            "",
+            f"  Primary focus   : {r['primary']}",
+            f"  Secondary       : {r['secondary']}",
+            f"  Recommended freq: {r['freq'][0]}–{r['freq'][1]} sessions/week",
+            "",
+            "Click 'Weekly Schedule' for exercises · 'Health Advice' for tips · 'HR Targets' for zones",
+        ]
+        write_output(self.output, "\n".join(lines))
+
+    def _show_week(self):
+        if not self._check_ready(): return
+        if self._rec is None:
+            self._generate()
+            return
+
+        r = self._rec
+        lines = [
+            "WEEKLY WORKOUT SCHEDULE",
+            "=" * 55,
+            "",
+        ]
+        for day, info in r["week"].items():
+            lines.append(f"── {day.upper()} ──────────────────────────────────────")
+            if info["type"] == "Rest":
+                lines.append(f"  REST DAY")
+                lines.append(f"  · Light walk or stretching only")
+                lines.append(f"  · Focus on sleep and hydration")
+            else:
+                lines.append(f"  {info['type'].upper()} · {info['duration']} min · {info.get('intensity','').title()} intensity")
+                for ex in info["exercises"]:
+                    lines.append(f"    › {ex}")
+            lines.append("")
+
+        write_output(self.output, "\n".join(lines))
+
+    def _show_advice(self):
+        if not self._check_ready(): return
+        if self._rec is None:
+            self._generate()
+            return
+
+        r = self._rec
+        m = self.app.member
+        lines = [
+            "HEALTH ADVICE & COACHING TIPS",
+            "=" * 55,
+            f"  Tailored for BMI category: {r['bmi_cat']}",
+            f"  Goal: {r['goal_label']}",
+            "",
+        ]
+        for i, tip in enumerate(r["advice"], 1):
+            lines.append(f"  {i}. {tip}")
+            lines.append("")
+
+        lines += [
+            "DATASET BENCHMARKS (1,576 members)",
+            "-" * 55,
+            f"  Avg calories/session : 1,038 kcal",
+            f"  Avg session duration : 83.5 min",
+            f"  Avg heart rate       : 146 bpm",
+            f"  Avg water intake     : 2.4 L/session",
+            "",
+            "  Your targets:",
+            f"    Calories/session   : {int(900 + m.experience_level * 80)}–{int(1050 + m.experience_level * 100)} kcal",
+            f"    Duration           : {r['freq'][0] * 45}–{r['freq'][1] * 60} min/week total",
+            f"    Water intake       : 2.0–3.0 L/session",
+        ]
+        write_output(self.output, "\n".join(lines))
+
+    def _show_hr(self):
+        if not self._check_ready(): return
+        if self._rec is None:
+            self._generate()
+            return
+
+        r = self._rec
+        t = r["targets"]
+        m = self.app.member
+        lines = [
+            "HEART RATE TARGETS (Karvonen Formula)",
+            "=" * 55,
+            f"  Max HR (220 - age)   : {t['mhr']} bpm",
+            f"  Resting HR           : {m.resting_bpm} bpm",
+            f"  HR Reserve           : {t['mhr'] - int(m.resting_bpm)} bpm",
+            "",
+            "  ZONES",
+            "  " + "-" * 40,
+            f"  Zone 2 (Aerobic base)   : {t['zone2_low']}–{t['zone2_high']} bpm  ← fat burning",
+            f"  Zone 3 (Aerobic)        : {t['zone3_low']}–{t['zone3_high']} bpm  ← cardio fitness",
+            f"  Zone 4 (Threshold)      : {t['zone4_low']}–{t['zone4_high']} bpm  ← performance",
+            "",
+            f"  RECOMMENDED ZONE FOR YOUR GOAL",
+            "  " + "-" * 40,
+            f"  Target zone  : {t['hr_zone']}",
+            "",
+            "  WHAT THIS MEANS",
+            "  " + "-" * 40,
+            "  Zone 2: Long steady sessions, burns fat, builds aerobic base.",
+            "  Zone 3: Moderate effort, improves cardiovascular fitness.",
+            "  Zone 4: Hard effort, increases VO2 max and performance.",
+            "",
+            "  TIP: Buy a HR monitor or use smartwatch — training",
+            "  in the right zone is the #1 factor in results.",
+        ]
+        write_output(self.output, "\n".join(lines))
+
+
+# -------------------------------------------------------------------
+# Tab 6: Run Tests
 # -------------------------------------------------------------------
 
 class TestsTab(ttk.Frame):
