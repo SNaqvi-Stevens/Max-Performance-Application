@@ -128,8 +128,8 @@ Max_Performance/
 
 ### Option 1 — Live web app (no installation)
 
-Visit: **[https://snaqvi3.github.io/Max-Performance-Application-main/](https://snaqvi3.github.io/Max-Performance-Application-main/)**
-
+Visit: **[[[https://snaqvi3.github.io/Max-Performance-Application/](https://snaqvi-stevens.github.io/Max-Performance-Application/)]
+](https://snaqvi-stevens.github.io/Max-Performance-Application/)
 Or open `index.html` directly in any browser.
 
 ### Option 2 — Tkinter desktop app
