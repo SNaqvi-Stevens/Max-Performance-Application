@@ -39,7 +39,7 @@ from analytics import (
 )
 from visualizer import (
     plot_calories_by_workout_type,
-    plot_bmi_distribution,
+    plot_bmi_by_experience,
     plot_hr_zone_distribution,
     plot_calories_vs_duration,
     plot_bmi_by_experience,
@@ -862,7 +862,7 @@ class ChartsTab(ttk.Frame):
 
     def _chart_bmi(self):
         if not self._check_ready(): return
-        path = plot_bmi_distribution(self.app.tracker.df)
+        path = plot_bmi_by_experience(self.app.tracker.df)
         self._show_chart(path)
 
     def _chart_zones(self):
