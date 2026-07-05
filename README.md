@@ -4,7 +4,7 @@ A Python program and interactive web application that loads gym workout records,
 
 ## 🌐 Live Web App
 
-**[Launch Max Performance →]([https://snaqvi3.github.io/Max-Performance-Application-main/](https://snaqvi-stevens.github.io/Max-Performance-Application/)**
+**[Launch Max Performance →]([https://snaqvi3.github.io/Max-Performance-Application-main/](https://snaqvi-stevens.github.io/Max-Performance-Application/))**
 
 The full app runs in any browser — no Python or installation required. Enter a member profile to get a personalised weekly workout plan, heart rate targets, health coaching tips, and dataset-driven comparisons.
 
